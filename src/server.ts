@@ -8,9 +8,36 @@ import {registerSecurityMiddleware} from "./util/securityMiddleware.js";
 
 const httpLogger = moduleLogger("HTTP");
 
-const expressApp = express();
+export const expressApp = express();
 
-expressApp.set("trust proxy", config.get<string | number | boolean>("server.proxy"));
+const proxySetting = config.get<string | number | boolean>("server.proxy");
+const trustProxy =
+  proxySetting === "true" ? true : proxySetting === "false" ? false : proxySetting;
+expressApp.set("trust proxy", trustProxy);
+
+// Azure App Service / Functions writes X-Forwarded-For entries as ip:port.
+// proxy-addr expects bare IPs, so strip the port from each entry.
+expressApp.use((req, _res, next) => {
+  const xff = req.headers["x-forwarded-for"];
+  if (typeof xff === "string") {
+    req.headers["x-forwarded-for"] = xff
+      .split(",")
+      .map(entry => {
+        const trimmed = entry.trim();
+        // IPv6 entries are bracketed like [::1]:1234; bare IPv4 is 1.2.3.4:5678
+        if (trimmed.startsWith("[")) {
+          const end = trimmed.indexOf("]");
+          return end === -1 ? trimmed : trimmed.slice(1, end);
+        }
+        const colon = trimmed.lastIndexOf(":");
+        return colon === -1 || trimmed.indexOf(":") !== colon
+          ? trimmed
+          : trimmed.slice(0, colon);
+      })
+      .join(", ");
+  }
+  next();
+});
 
 expressApp.use(express.urlencoded({extended: false}));
 expressApp.use(RIdMiddleWare({echoHeader: true}));
@@ -45,10 +72,8 @@ expressApp.use(
   }),
 );
 
-//needed for error handler
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 expressApp.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  //Don't write to the request if its already been closed
   if (!res.writableEnded) {
     res.status(500).send("Error occured in application. Contact application owner.").end();
   }

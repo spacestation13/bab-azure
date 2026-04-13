@@ -1,15 +1,11 @@
 {
-  //Where to bind http server
   "server": {
     "host": "::1",
-    // Use a nonnumeric value to use an environment variable
     "port": "80",
-    //How can people access this service
     "publicUrl": "",
-    //Is it behind a proxy, follows the format at https://expressjs.com/en/4x/api.html#trust.proxy.options.table minus the functions
+    // Follows the format at https://expressjs.com/en/4x/api.html#trust.proxy.options.table minus the functions
     "proxy": false
   },
-  //Database settings
   "database": {
     "connectionString": ""
   },
@@ -17,56 +13,30 @@
     /* Sources */
 
 
-    //Controls settings for the HTTP logger
     "http": {
-      //Level of 1xx-3xx messages, 4xx is always warning and 5xx is always error
+      // 1xx-3xx are info, 4xx is always warning, 5xx is always error
       "level": "info",
-      //Log metadata about the request and response (can spam logs quickly)
+      // Can spam logs quickly
       "meta": false
-    },
-    "database": {
-      "levels": {
-        "query": "debug",
-        "info": "info",
-        "warn": "warning",
-        "error": "error"
-      }
     },
 
 
     /* Sinks */
 
 
-    //Controls settings for file log output
-    "file": {
-      //Minimum level for logs to be output
-      "level": "info",
-      //Enabled
-      "enabled": true
-    },
-    //Controls settings for file error log output
-    "file-err": {
-      //Minimum level for logs to be output
-      "level": "warning",
-      //Enabled
-      "enabled": true
-    },
     "console": {
-      //Minimum level for logs to be output
       "level": "info",
-      //Enabled
       "enabled": true,
-      //Use util.inspect() to colorize the metadata, has a performance impact. Ignored when logging.console.json is true
+      // Has performance impact. Ignored when logging.console.json is true
       "pretty": false,
-      //If console output should be in JSON format. Ignores logging.console.pretty when true
-      "json": false
+      // Functions/App Insights expects JSON
+      "json": true
     }
   },
-  //Changing any of these in production environments is heavily discouraged. You will probably violate an RFC and reduce the security of your installation
+  // Changing any of these in production is heavily discouraged. You will probably violate an RFC and reduce security.
   "security": {
-    //Enable mocking of byond.com/login.cgi.
+    // Mock byond.com/login.cgi
     "test": false,
-    //Enforce redirect_uris
     "enforce_redirect_uri": true
   }
 }

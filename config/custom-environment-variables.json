@@ -1,0 +1,21 @@
+{
+  "database": {
+    "connectionString": "BAB_DB_CONNECTION_STRING"
+  },
+  "server": {
+    "publicUrl": "BAB_PUBLIC_URL",
+    "proxy": "BAB_PROXY",
+    "port": "BAB_PORT",
+    "host": "BAB_HOST"
+  },
+  "security": {
+    "test": "BAB_SECURITY_TEST",
+    "enforce_redirect_uri": "BAB_ENFORCE_REDIRECT_URI"
+  },
+  "logging": {
+    "console": {
+      "json": "BAB_LOG_JSON",
+      "level": "BAB_LOG_LEVEL"
+    }
+  }
+}

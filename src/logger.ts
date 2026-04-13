@@ -6,8 +6,6 @@ const {createLogger, format, transports} = winston;
 import chalk from "chalk";
 import {table} from "table";
 import pchars from "printable-characters";
-import "winston-daily-rotate-file";
-
 export const logLevels = {
   emerg: 0,
   crit: 1,
@@ -29,7 +27,6 @@ const generatePastelColor = (input_str: string) => {
   const rand_2 = Math.abs(Math.sin(seed++) * 10000) % 256;
   const rand_3 = Math.abs(Math.sin(seed++) * 10000) % 256;
 
-  //build colour
   const red = Math.round((rand_1 + baseRed) / 2);
   const green = Math.round((rand_2 + baseGreen) / 2);
   const blue = Math.round((rand_3 + baseBlue) / 2);
@@ -125,34 +122,6 @@ const logger = createLogger({
   level: "info",
   levels: logLevels,
   transports: [
-    config.get<boolean>("logging.file.enabled") &&
-      new transports.DailyRotateFile({
-        level: config.get<string>("logging.file.level"),
-        datePattern: "YYYY-MM-DD",
-        filename: `logs/bab-%DATE%.log`,
-        dirname: "logs",
-        format: format.combine(
-          stripEmptyMeta(),
-          addRequestId(),
-          format.timestamp({alias: "timestamp"}),
-          format.errors({stack: true}),
-          format.json(),
-        ),
-      }),
-    config.get<boolean>("logging.file-err.enabled") &&
-      new transports.DailyRotateFile({
-        level: config.get<string>("logging.file-err.level"),
-        datePattern: "YYYY-MM-DD",
-        filename: `logs/bab-%DATE%-err.log`,
-        dirname: "logs",
-        format: format.combine(
-          stripEmptyMeta(),
-          addRequestId(),
-          format.timestamp({alias: "timestamp"}),
-          format.errors({stack: true}),
-          format.json(),
-        ),
-      }),
     new transports.Console({
       level: config.get<string>("logging.console.level"),
       silent: !config.get<boolean>("logging.console.enabled"),
@@ -176,7 +145,7 @@ const logger = createLogger({
             consoleFormatter,
           ),
     }),
-  ].filter(x => x !== false),
+  ],
 });
 
 const loggers: Map<string, Logger> = new Map();

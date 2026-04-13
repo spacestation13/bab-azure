@@ -1,10 +1,14 @@
 import {URL} from "url";
 import {JWTVerifyGetKey, importJWK, JWK, jwtVerify} from "jose";
-import Prisma from "@prisma/client";
 import rTracer from "cls-rtracer";
 import config from "config";
 import expressAsyncHandler from "express-async-handler";
-import {prismaDb} from "../../db/index.js";
+import {authorizations, clients, signingKeys} from "../../db/index.js";
+import {
+  AuthorizationStatus,
+  ResponseMode,
+  ResponseTypes,
+} from "../../db/types.js";
 import {moduleLogger} from "../../logger.js";
 import {promptTypes, supportedScopes} from "../../util/constants.js";
 import {generateSecureString} from "../../util/crypto.js";
@@ -21,7 +25,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
 
   const raw_params = req.method === "GET" ? req.query : req.body;
 
-  //Validate that no query parameters are set twice, and check for Qs memes, see RFC6749 Section 3.1
+  // Validate that no query parameters are set twice, and check for Qs memes, see RFC6749 Section 3.1
   const invalid_query_params: string[] = [];
   for (const [key, value] of Object.entries(raw_params)) {
     if (typeof value !== "string") invalid_query_params.push(key);
@@ -32,21 +36,18 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
       queryParams: raw_params,
       invalidParams: invalid_query_params,
     });
-    return (
-      res
-        .status(400)
-        //XSS protection
-        .type("text/plain")
-        .send(
-          `Invalid query parameters: ${invalid_query_params.join(
-            ", ",
-          )}. Request ID: ${rTracer.id()}`,
-        )
-        .end()
-    );
+    return res
+      .status(400)
+      .type("text/plain")
+      .send(
+        `Invalid query parameters: ${invalid_query_params.join(
+          ", ",
+        )}. Request ID: ${rTracer.id()}`,
+      )
+      .end();
   }
 
-  //Ignore all empty responses, see RFC6749 Section 3.1
+  // Ignore all empty responses, see RFC6749 Section 3.1
   const {
     response_type: _response_type,
     client_id,
@@ -66,44 +67,36 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     ),
   );
 
-  //Validate client exists
   const unknownClientId = () => {
     authLogger.warning(`Unknown client`, {
       client_id: client_id,
     });
-    return (
-      res
-        .status(400)
-        //XSS protection
-        .type("text/plain")
-        .send(`Invalid client_id: ${client_id}. Request ID: ${rTracer.id()}`)
-        .end()
-    );
+    return res
+      .status(400)
+      .type("text/plain")
+      .send(`Invalid client_id: ${client_id}. Request ID: ${rTracer.id()}`)
+      .end();
   };
   if (client_id === undefined) return unknownClientId();
-  const client = await prismaDb.client.findUnique({
-    where: {clientId: client_id},
-    select: {redirectUris: true, allowedTokenGrant: true, disabled: true},
-  });
+  const client = await clients.findOne(
+    {_id: client_id},
+    {projection: {redirectUris: 1, allowedTokenGrant: 1, disabled: 1}},
+  );
   if (!client) return unknownClientId();
 
   if (client.disabled !== null) {
     authLogger.warning(`Client is disabled`, {
       client_id,
     });
-    return (
-      res
-        .status(400)
-        //XSS protection
-        .type("text/plain")
-        .send(
-          `The client "${client_id}" has been disabled for the following reason: ${client.disabled}.`,
-        )
-        .end()
-    );
+    return res
+      .status(400)
+      .type("text/plain")
+      .send(
+        `The client "${client_id}" has been disabled for the following reason: ${client.disabled}.`,
+      )
+      .end();
   }
 
-  //Validate that redirect_uri is valid
   if (
     redirect_uri === undefined ||
     (!client.redirectUris.includes(redirect_uri) &&
@@ -113,32 +106,25 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
       client_id: client_id,
       redirect_uri: redirect_uri,
     });
-    return (
-      res
-        .status(400)
-        //XSS protection
-        .type("text/plain")
-        .send(`Invalid redirect_uri: ${redirect_uri}. Request ID: ${rTracer.id()}`)
-        .end()
-    );
+    return res
+      .status(400)
+      .type("text/plain")
+      .send(`Invalid redirect_uri: ${redirect_uri}. Request ID: ${rTracer.id()}`)
+      .end();
   }
 
-  //We have validated enough of the request to know the redirect_uri is valid. From now on, errors go back to the app
+  // We have validated enough of the request to know the redirect_uri is valid.
+  // From now on, errors go back to the app.
   req.redirect_uri = redirect_uri;
 
-  //Set sub claim
   let subClaim = null;
   if (id_token_hint !== undefined) {
     try {
       const decodedToken = await jwtVerify(id_token_hint, (async protectedHeader => {
-        const key = await prismaDb.signingKey.findUnique({
-          where: {
-            id: protectedHeader.kid,
-          },
-          select: {
-            public: true,
-          },
-        });
+        const key = await signingKeys.findOne(
+          {_id: protectedHeader.kid!},
+          {projection: {public: 1}},
+        );
         if (!key) throw Error(`No key found for ID ${protectedHeader.kid}`);
 
         return await importJWK(key.public as JWK, "RS256");
@@ -160,8 +146,8 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     }
   }
 
-  //https://openid.net/specs/oauth-v2-multiple-response-types-1_0.html Section 2.1 Response Modes
-  if (_response_mode !== undefined && !(_response_mode in Prisma.ResponseMode)) {
+  // https://openid.net/specs/oauth-v2-multiple-response-types-1_0.html Section 2.1 Response Modes
+  if (_response_mode !== undefined && !(_response_mode in ResponseMode)) {
     authLogger.warning("Invalid response_mode", {
       response_mode: _response_mode,
     });
@@ -174,10 +160,8 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  //Parse scopes
   let scopes = _scope?.split(" ") ?? null;
 
-  //Validate that scopes include openid
   if (!scopes?.includes("openid")) {
     authLogger.warning("scope is lacking openid scope", {scopes});
     return oauth_authorize_error(
@@ -189,10 +173,8 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  // Filter parsed scopes to only the ones we support
   scopes = scopes.filter(scope => supportedScopes.includes(scope));
 
-  //Validate response type is present
   if (_response_type === undefined) {
     authLogger.warning("Response type is required", {_response_type});
     return oauth_authorize_error(
@@ -206,10 +188,9 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
 
   const _response_types = _response_type.split(" ");
 
-  //Validate response_type to be a valid value
   if (
     _response_types.length === 0 ||
-    _response_types.some(value => !(value in Prisma.ResponseTypes))
+    _response_types.some(value => !(value in ResponseTypes))
   ) {
     authLogger.warning("Invalid response types", {
       _response_types,
@@ -222,9 +203,8 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
       state,
     );
   }
-  const response_types = _response_types as Prisma.ResponseTypes[];
+  const response_types = _response_types as ResponseTypes[];
 
-  //Token grant whitelist
   if (response_types.includes("id_token") && !(client.allowedTokenGrant as boolean)) {
     authLogger.warning(
       "Attempted to use ID token grant for client without support for ID token grant",
@@ -239,7 +219,6 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  //Error if registration is set
   if (registration !== undefined) {
     authLogger.warning("Attempted to make use of registration parameter", {
       registration,
@@ -253,7 +232,6 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  //Validate prompt
   if (_prompt !== undefined && !(_prompt in promptTypes)) {
     authLogger.warning("Unknown prompt type", {prompt: _prompt});
     return oauth_authorize_error(
@@ -266,7 +244,6 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
   }
   const prompt = _prompt as promptTypes | undefined;
 
-  //Return proper error for prompt since we support none of the values
   if (prompt !== undefined) {
     authLogger.warning("Returning error for prompt", {prompt});
     switch (prompt) {
@@ -305,7 +282,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     }
   }
 
-  //RFC says we need to throw an erorr if it's not supported
+  // RFC says we need to throw an error if it's not supported
   if (request !== undefined) {
     authLogger.warning("request parameter is not supported", {
       request,
@@ -319,7 +296,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  //RFC says we need to throw an erorr if it's not supported
+  // RFC says we need to throw an error if it's not supported
   if (request_uri !== undefined) {
     authLogger.warning("request_uri parameter is not supported", {
       request,
@@ -333,10 +310,9 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  let response_mode = _response_mode as Prisma.ResponseMode | undefined;
-  //Default response modes
+  let response_mode = _response_mode as ResponseMode | undefined;
   if (response_mode === undefined) {
-    //ID token says default is "fragment", code and none is "query"
+    // ID token spec says default is "fragment"; code and none default to "query"
     if (response_types.includes("id_token")) {
       response_mode = "fragment";
     } else {
@@ -344,7 +320,6 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     }
   }
 
-  //Check if id_token response_type has response_mode query (and deny)
   if (response_types.includes("id_token") && response_mode === "query") {
     authLogger.warning("Query response mode must not be used for id_token response type", {
       response_types,
@@ -359,7 +334,6 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  //Check if id_token response_type has response_mode query (and deny)
   if (response_types.includes("id_token") && nonce === undefined) {
     authLogger.warning("Nonce required for id_token claim.", {
       response_types,
@@ -373,8 +347,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  //None should not be combined with other response types
-  if (response_types.includes(Prisma.ResponseTypes.none) && response_types.length >= 2) {
+  if (response_types.includes(ResponseTypes.none) && response_types.length >= 2) {
     authLogger.warning("Attempted to combine response_type none with other response_types", {
       response_types,
     });
@@ -387,9 +360,9 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  //Leaving the spec and entering our implementation code
+  // Leaving the spec and entering our implementation code
 
-  //Save information about the login attempt
+  // Save information about the login attempt
   if (req.ip == null) {
     return oauth_authorize_error(
       res,
@@ -399,21 +372,23 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
       state,
     );
   }
-  const {byondState} = await prismaDb.authorization.create({
-    data: {
-      byondState: await generateSecureString(24),
-      state: state,
-      redirectUri: req.redirect_uri,
-      client: {
-        connect: {clientId: client_id},
-      },
-      userIp: req.ip,
-      responseMode: response_mode,
-      responseTypes: response_types,
-      scopes: scopes,
-      nonce: nonce,
-      subClaim: subClaim,
-    },
+  const byondState = await generateSecureString(24);
+  await authorizations.insertOne({
+    byondState,
+    status: AuthorizationStatus.Created,
+    startDate: new Date(),
+    endDate: null,
+    clientId: client_id,
+    redirectUri: req.redirect_uri,
+    state: state ?? null,
+    userIp: req.ip,
+    responseMode: response_mode,
+    responseTypes: response_types,
+    scopes,
+    nonce: nonce ?? null,
+    subClaim: (subClaim as string | null) ?? null,
+    ckey: null,
+    code: null,
   });
 
   const publicUrl = config.get<string>("server.publicUrl");

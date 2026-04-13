@@ -1,9 +1,9 @@
-import Prisma from "@prisma/client";
 import config from "config";
 import expressAsyncHandler from "express-async-handler";
 import {SignJWT} from "jose";
 import {getActiveKey} from "../../controllers/keyController.js";
-import {prismaDb} from "../../db/index.js";
+import {authorizations, clients, userData} from "../../db/index.js";
+import {AuthorizationStatus, ClientType} from "../../db/types.js";
 import {moduleLogger} from "../../logger.js";
 import {generateOIDCHash, secureCompare} from "../../util/crypto.js";
 import {oauth_token_error} from "../../util/responseHelpers.js";
@@ -18,7 +18,7 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     client_secret: param_client_secret,
   } = req.body;
 
-  //Validate parameters
+  // Validate parameters
   if (typeof grant_type !== "string") {
     tokenLogger.warning(`grant_type is not a string`, {grant_type});
     return oauth_token_error(res, "invalid_request", `grant_type is not a string`);
@@ -35,13 +35,13 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     tokenLogger.warning(`client_id is not a string`, {param_client_secret});
     return oauth_token_error(res, "invalid_request", `client_id is not a string`);
   }
-  //We also support http basic auth, we'll check for proper auth later, for now, allow client_secret
+  // We also support http basic auth; proper auth is checked later, for now allow missing client_secret
   if (typeof param_client_secret !== "string" && param_client_secret !== undefined) {
     tokenLogger.warning(`client_secret is not a string`, {param_client_secret});
     return oauth_token_error(res, "invalid_request", `client_secret is not a string or null`);
   }
 
-  //Validate grant_type
+  // Validate grant_type
   if (grant_type !== "authorization_code") {
     tokenLogger.warning('grant_type is not "authorization_code"', {grant_type});
     return oauth_token_error(
@@ -72,24 +72,19 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     return res.status(401).setHeader("WWW-Authenticate", "Basic").end();
   }
 
-  //Fetch the client
-  const client = await prismaDb.client.findUnique({
-    where: {
-      clientId: client_id,
-    },
-    select: {
-      clientSecret: true,
-      type: true,
-    },
-  });
+  // Fetch the client
+  const client = await clients.findOne(
+    {_id: client_id},
+    {projection: {clientSecret: 1, type: 1, expiry: 1, disabled: 1}},
+  );
 
-  //Check that the client exists
+  // Check that the client exists
   if (!client) {
     tokenLogger.warning("Client not found", {client_id});
     return oauth_token_error(res, "unsupported_grant_type", "Unknown client_id");
   }
-  //Validate client authentication
-  if (client.type === Prisma.ClientType.Confidential) {
+  // Validate client authentication
+  if (client.type === ClientType.Confidential) {
     if (client_secret === undefined) {
       tokenLogger.warning("Attempted to call token endpoint without a client_secret", {
         body: req.body,
@@ -105,53 +100,28 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     }
   }
 
-  //Fetch the authorization
-  const authorization = await prismaDb.authorization.findUnique({
-    where: {
-      code,
-    },
-    select: {
-      id: true,
-      status: true,
-      clientId: true,
-      redirectUri: true,
-      ckey: true,
-      endDate: true,
-      nonce: true,
-      scopes: true,
-      userData: {
-        select: {
-          gender: true,
-        },
-      },
-      client: {
-        select: {
-          expiry: true,
-          disabled: true,
-        },
-      },
-    },
-  });
+  // Fetch the authorization
+  const authorization = await authorizations.findOne({code});
 
   const time5minsago = Date.now() - 5 * 60 * 1000;
 
   if (
     !authorization ||
-    authorization.status !== Prisma.AuthorizationStatus.CodeIssued ||
-    (authorization.endDate ?? 0).valueOf() < time5minsago
+    authorization.status !== AuthorizationStatus.CodeIssued ||
+    (authorization.endDate ?? new Date(0)).valueOf() < time5minsago
   ) {
     tokenLogger.warning("Invalid or expired code", {code, authorization});
     return oauth_token_error(res, "invalid_grant", "Invalid code");
   }
 
-  await prismaDb.authorization.update({
-    where: {
-      id: authorization.id,
-    },
-    data: {
-      status: Prisma.AuthorizationStatus.Completed,
-    },
-  });
+  const authUser = authorization.ckey
+    ? await userData.findOne({_id: authorization.ckey}, {projection: {gender: 1}})
+    : null;
+
+  await authorizations.updateOne(
+    {_id: authorization._id},
+    {$set: {status: AuthorizationStatus.Completed}},
+  );
 
   if (authorization.clientId !== client_id) {
     tokenLogger.warning("Code for wrong client", {
@@ -171,12 +141,12 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     return oauth_token_error(res, "invalid_grant", "Invalid redirect_uri");
   }
 
-  if (authorization.client.disabled !== null) {
+  if (client.disabled !== null) {
     tokenLogger.warning("Client is disabled", {client_id});
     return oauth_token_error(
       res,
       "invalid_client",
-      `The client "${client_id}" is disabled for the following reason: ${authorization.client.disabled}`,
+      `The client "${client_id}" is disabled for the following reason: ${client.disabled}`,
     );
   }
 
@@ -186,46 +156,46 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
 
   const access_token = await new SignJWT({
     iss: config.get<string>("server.publicUrl"),
-    //If there's a code, there's a ckey
+    // If there's a code, there's a ckey
     sub: `user:${authorization.ckey!}`,
     ckey: authorization.ckey!,
     aud: config.get<string>("server.publicUrl"),
-    exp: currentEpoch + authorization.client.expiry,
+    exp: currentEpoch + client.expiry,
     iat: currentEpoch.valueOf(),
-    //If there's a code, the auth is complete
+    // If there's a code, the auth is complete
     auth_time: authTime,
     nonce: authorization.nonce,
     azp: client_id,
     c_hash: generateOIDCHash(code),
-    //If there's a code, there's a gender
-    gender: authorization.userData!.gender,
+    // If there's a code, there's a gender
+    gender: authUser!.gender,
   })
     .setProtectedHeader({
       alg: "RS256",
-      kid: key.id,
+      kid: key._id,
       type: "JOSE",
     })
     .sign(key.importedPrivate);
   const id_token = await new SignJWT({
     iss: config.get<string>("server.publicUrl"),
-    //If there's a code, there's a ckey
+    // If there's a code, there's a ckey
     sub: `user:${authorization.ckey!}`,
     ckey: authorization.ckey!,
     aud: client_id,
-    exp: currentEpoch.valueOf() + authorization.client.expiry,
+    exp: currentEpoch.valueOf() + client.expiry,
     iat: currentEpoch.valueOf(),
-    //If there's a code, the auth is complete
+    // If there's a code, the auth is complete
     auth_time: authTime,
     nonce: authorization.nonce,
     azp: client_id,
     c_hash: generateOIDCHash(code),
     at_hash: generateOIDCHash(access_token),
-    //If there's a code, there's a gender
-    gender: authorization.userData!.gender,
+    // If there's a code, there's a gender
+    gender: authUser!.gender,
   })
     .setProtectedHeader({
       alg: "RS256",
-      kid: key.id,
+      kid: key._id,
       type: "JOSE",
     })
     .sign(key.importedPrivate);
@@ -235,7 +205,7 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     token_type: "Bearer",
     id_token: id_token,
     scope: authorization.scopes.join(" "),
-    expires_in: authorization.client.expiry,
+    expires_in: client.expiry,
   });
   tokenLogger.info(`Issued token to "${authorization.ckey}" for client "${client_id}"`);
 });

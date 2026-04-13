@@ -3,13 +3,12 @@
   "version": "1.0.0",
   "description": "Byond Authentication Bridge",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/functions/*.js",
   "scripts": {
     "build": "tsc && cp -r src/html dist/html",
     "nodemon": "NODE_OPTIONS=\"--loader ts-node/esm\" npx nodemon src/index.ts",
     "start": "NODE_OPTIONS=\"--loader ts-node/esm\" node src/index.ts",
-    "devUpdateDb": "npx prisma format && npx prisma db push && npx prisma generate",
-    "generateDbClient": "npx prisma generate"
+    "seed": "NODE_OPTIONS=\"--loader ts-node/esm\" node scripts/seed.ts"
   },
   "keywords": [],
   "author": "alexkar598",
@@ -23,7 +22,7 @@
   },
   "homepage": "https://github.com/alexkar598/bab#readme",
   "dependencies": {
-    "@prisma/client": "^6.4.1",
+    "@azure/functions": "^4.5.0",
     "bab-hub-rs": "0.0.2",
     "chalk": "^5.4.1",
     "cls-rtracer": "^2.6.3",
@@ -32,11 +31,11 @@
     "express-async-handler": "^1.2.0",
     "express-winston": "^4.2.0",
     "jose": "^6.0.8",
+    "mongodb": "^6.10.0",
     "printable-characters": "^1.0.42",
     "string-to-color": "^2.2.2",
     "table": "^6.9.0",
-    "winston": "^3.17.0",
-    "winston-daily-rotate-file": "^5.0.0"
+    "winston": "^3.17.0"
   },
   "devDependencies": {
     "@eslint/compat": "^1.2.7",
@@ -55,7 +54,6 @@
     "globals": "^16.0.0",
     "nodemon": "^3.1.9",
     "prettier": "^3.5.3",
-    "prisma": "^6.4.1",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.2"
   },
@@ -64,9 +62,8 @@
     "watch": [
       "src/",
       "config/",
-      "types/",
-      "node_modules/.prisma"
+      "types/"
     ],
-    "ext": "json,ts,js,prisma"
+    "ext": "json,ts,js"
   }
 }

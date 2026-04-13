@@ -1,12 +1,11 @@
 import {URL, URLSearchParams} from "url";
 import {SignJWT} from "jose";
-import Prisma from "@prisma/client";
 import rTracer from "cls-rtracer";
 import config from "config";
 import expressAsyncHandler from "express-async-handler";
-import {requestCkey} from "bab-hub-rs";
 import {getActiveKey} from "../../controllers/keyController.js";
-import {prismaDb} from "../../db/index.js";
+import {authorizations, byondCerts, clients, userData} from "../../db/index.js";
+import {AuthorizationStatus, ResponseMode} from "../../db/types.js";
 import {moduleLogger} from "../../logger.js";
 import {domain} from "../../util/constants.js";
 import {generateOIDCHash, generateSecureString, secureCompare} from "../../util/crypto.js";
@@ -14,24 +13,10 @@ import {oauth_authorize_error} from "../../util/responseHelpers.js";
 
 export const callbackLogger = moduleLogger("CallbackEndpoint");
 
-/*
-//Middleware to supress warnings about logging in to a website that does not support authentication
-authRouter.use("/callback", (req, res, next) => {
-  if (!req.headers.authorization) {
-    console.log("Requesting authentication");
-    res.setHeader("WWW-Authenticate", "Basic");
-    res.sendStatus(401);
-  } else {
-    next();
-  }
-});
- */
-
 const callbackEndpoint = expressAsyncHandler(async (req, res) => {
   function returnError(error: string) {
     res
       .status(400)
-      //XSS protection
       .type("text/plain")
       .send(`${error} Request ID: ${rTracer.id()}`)
       .end();
@@ -39,68 +24,31 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
 
   const client_id = req.query.client_id;
 
-  /*
-  //Validate authorization header exists
-  if (!req.headers.authorization) {
-    callbackLogger.warning("Authorization header is missing");
-    return returnError(`Authorization header is missing.`);
-  }
-
-  //Validate that is a basic authorization
-  if (req.headers.authorization.substring(0, 6) !== "Basic ") {
-    callbackLogger.warning("Authorization header is invalid", {
-      header: req.headers.authorization,
-    });
-    return returnError(
-      `Authorization header is invalid. Authorization header: ${req.headers.authorization}.`,
-    );
-  }
-
-  //Parse the authorization header
-  const [username] = Buffer.from(req.headers.authorization.substring(6), "base64")
-    .toString()
-    .split(":", 1);
-  const [client_id, byondState] = username.split(":", 2);
-  */
-
-  //Validate byondstate
   const byondState = req.query.byond_state;
   if (typeof byondState !== "string") {
     callbackLogger.warning("byondState is invalid", {byondState});
     return returnError("byondState is invalid.");
   }
 
-  //Validate encodedcert
   const encodedCert = req.query.encoded_cert;
   if (typeof encodedCert !== "string") {
     callbackLogger.warning("encodedCert is invalid", {encodedCert});
     return returnError("encodedCert is invalid.");
   }
 
-  const decodedCert = await prismaDb.byondCert.findUnique({
-    where: {
-      encodedCert,
-    },
-    select: {
-      byondState: true,
-      byondCert: true,
-      clientIp: true,
-    },
-  });
+  const certMaxAge = new Date(Date.now() - 5 * 60 * 1000);
+  const decodedCert = await byondCerts.findOne(
+    {_id: encodedCert, createdTime: {$gte: certMaxAge}},
+    {projection: {byondState: 1, byondCert: 1, clientIp: 1}},
+  );
 
-  //Validate that the cert exists
   if (!decodedCert) {
     callbackLogger.warning("encodedCert is invalid", {encodedCert});
     return returnError("encodedCert is invalid.");
   }
 
-  await prismaDb.byondCert.delete({
-    where: {
-      encodedCert,
-    },
-  });
+  await byondCerts.deleteOne({_id: encodedCert});
 
-  //Validate that the ip matches
   if (decodedCert.clientIp !== req.ip) {
     callbackLogger.warning("clientIp mismatch", {
       expected: decodedCert.clientIp,
@@ -110,7 +58,6 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     return returnError("Client IP mismatch.");
   }
 
-  //Validate that the state is matching
   if (!secureCompare(decodedCert.byondState, byondState)) {
     callbackLogger.warning("byondState mismatch", {
       expected: decodedCert.byondState,
@@ -120,7 +67,7 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     return returnError("byondState mismatch.");
   }
 
-  //Validate the actual byondCert, if you remember right, we don't check it in securityMiddleware, we just encode it
+  // securityMiddleware only encodes it; we verify its shape here.
   const byondCert = JSON.parse(decodedCert.byondCert);
   if (typeof byondCert !== "string") {
     callbackLogger.warning("byondCert is invalid", {
@@ -130,33 +77,8 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     return returnError("byondCert is invalid.");
   }
 
-  //Fetch the authorization object
-  const authorization = await prismaDb.authorization.findUnique({
-    select: {
-      client: {
-        select: {
-          clientId: true,
-          expiry: true,
-          disabled: true,
-        },
-      },
-      id: true,
-      userIp: true,
-      state: true,
-      startDate: true,
-      redirectUri: true,
-      status: true,
-      responseMode: true,
-      responseTypes: true,
-      nonce: true,
-      subClaim: true,
-    },
-    where: {
-      byondState: byondState,
-    },
-  });
+  const authorization = await authorizations.findOne({byondState});
 
-  //Check that we received an object
   if (!authorization) {
     callbackLogger.warning("Can't find authorization request", {
       byondState: byondState,
@@ -164,8 +86,18 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     return returnError("Unable to find authorization request");
   }
 
-  //Check that the authorization header client_id matches the one in the authorization object
-  if (authorization.client.clientId != client_id) {
+  const authClient = await clients.findOne(
+    {_id: authorization.clientId},
+    {projection: {expiry: 1, disabled: 1}},
+  );
+  if (!authClient) {
+    callbackLogger.warning("Client from authorization no longer exists", {
+      clientId: authorization.clientId,
+    });
+    return returnError("Unknown client");
+  }
+
+  if (authorization.clientId != client_id) {
     callbackLogger.warning("client_id mismatch", {
       authorization: authorization,
       client_id,
@@ -174,17 +106,17 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     return returnError(`client_id mismatch. Got ${client_id}`);
   }
 
-  if (authorization.client.disabled !== null) {
+  if (authClient.disabled !== null) {
     callbackLogger.warning("client is disabled", {
       client_id,
     });
     return returnError(
-      `The client "${client_id}" is disabled for the following reason: ${authorization.client.disabled}`,
+      `The client "${client_id}" is disabled for the following reason: ${authClient.disabled}`,
     );
   }
   req.redirect_uri = authorization.redirectUri;
 
-  //Check that the user hasn't changed IPs (uh oh) between /authorize and /callback
+  // Check that the user hasn't changed IPs between /authorize and /callback
   if (authorization.userIp != req.ip) {
     callbackLogger.warning("IP mismatch", {
       expected_ip: authorization.userIp,
@@ -200,8 +132,7 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  //Check that the authorization request isn't being used twice
-  if (authorization.status !== Prisma.AuthorizationStatus.Created) {
+  if (authorization.status !== AuthorizationStatus.Created) {
     callbackLogger.warning("Authorization is already completed", {
       authorization,
     });
@@ -215,7 +146,6 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  //Check that the authorization request isn't too old
   const timestamp15minsago = Date.now() - 15 * 60 * 1000;
   if (authorization.startDate.valueOf() < timestamp15minsago) {
     callbackLogger.warning("Authorization is too old", {
@@ -230,22 +160,21 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  //Fetches the userdata either from byond or the test client
-  let userData;
+  // Fetch the user data either from BYOND or the test mock
+  let userDataResult;
   if (config.get<boolean>("security.test")) {
-    //Cert == ckey
-    userData = {
+    // Cert == ckey in test mode
+    userDataResult = {
       valid: true,
       key: byondCert,
       gender: "test",
     };
   } else {
-    //Fetch user data from BYOND
-    userData = await requestCkey(byondCert, domain);
+    const {requestCkey} = await import("bab-hub-rs");
+    userDataResult = await requestCkey(byondCert, domain);
   }
 
-  //Nope
-  if (!userData.valid) {
+  if (!userDataResult.valid) {
     callbackLogger.warning("Hub does not recognize certificate", {byondCert, domain});
     return oauth_authorize_error(
       res,
@@ -256,8 +185,8 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  //Sub claim
-  if (authorization.subClaim !== null && authorization.subClaim !== userData.key) {
+  // Sub claim enforcement: the client asked for a specific user, and someone else is logged in
+  if (authorization.subClaim !== null && authorization.subClaim !== userDataResult.key) {
     callbackLogger.warning("Another user is logged in", {byondCert, domain});
     return oauth_authorize_error(
       res,
@@ -268,41 +197,28 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  //Make a code and associate the authorization to the user data
+  // Mint a code and associate the authorization with the user data
   const code = (authorization.responseTypes.includes("code") as boolean)
     ? await generateSecureString(24)
     : null;
-  await prismaDb.authorization.update({
-    where: {
-      id: authorization.id,
-    },
-    data: {
-      code,
-      status: (authorization.responseTypes.includes("code") as boolean)
-        ? "CodeIssued"
-        : "Completed",
-      endDate: new Date(),
-      userData: {
-        connectOrCreate: {
-          where: {
-            ckey: userData.key,
-          },
-          create: {
-            ckey: userData.key,
-            gender: userData.gender,
-          },
-        },
+  await userData.updateOne(
+    {_id: userDataResult.key},
+    {$set: {gender: userDataResult.gender}},
+    {upsert: true},
+  );
+  await authorizations.updateOne(
+    {_id: authorization._id},
+    {
+      $set: {
+        code,
+        status: authorization.responseTypes.includes("code")
+          ? AuthorizationStatus.CodeIssued
+          : AuthorizationStatus.Completed,
+        endDate: new Date(),
+        ckey: userDataResult.key,
       },
     },
-  });
-  await prismaDb.userData.update({
-    where: {
-      ckey: userData.key,
-    },
-    data: {
-      gender: userData.gender,
-    },
-  });
+  );
 
   let id_token;
   if (authorization.responseTypes.includes("id_token")) {
@@ -311,44 +227,43 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     callbackLogger.info("Issuing ID token via hybrid/implicit flow");
     id_token = await new SignJWT({
       iss: config.get<string>("server.publicUrl"),
-      sub: `user:${userData.key}`,
-      ckey: userData.key,
+      sub: `user:${userDataResult.key}`,
+      ckey: userDataResult.key,
       aud: client_id,
-      exp: new Date().valueOf() + authorization.client.expiry * 1000,
+      exp: new Date().valueOf() + authClient.expiry * 1000,
       iat: new Date().valueOf(),
       auth_time: new Date().valueOf(),
       nonce: authorization.nonce,
       azp: client_id,
       c_hash: code !== null ? generateOIDCHash(code) : undefined,
-      gender: userData.gender,
+      gender: userDataResult.gender,
     })
       .setProtectedHeader({
         alg: "RS256",
-        kid: key.id,
+        kid: key._id,
         type: "JOSE",
       })
       .sign(key.importedPrivate);
   }
 
-  //Redirect to app with code
+  // Redirect back to app with code / id_token
   const redirect = new URL(authorization.redirectUri);
 
-  //Query response mode
-  if (authorization.responseMode === Prisma.ResponseMode.query) {
-    /*Code Grant*/ if (code !== null) redirect.searchParams.set("code", code);
-    /*State*/ if (authorization.state != null)
+  // Query response mode
+  if (authorization.responseMode === ResponseMode.query) {
+    /* Code Grant */ if (code !== null) redirect.searchParams.set("code", code);
+    /* State */ if (authorization.state != null)
       redirect.searchParams.set("state", authorization.state);
-
-    //Fragment response mode
-  } else if (authorization.responseMode === Prisma.ResponseMode.fragment) {
+    // Fragment response mode
+  } else if (authorization.responseMode === ResponseMode.fragment) {
     const fragmentParams = new URLSearchParams();
 
-    /*Code Grant*/ if (code !== null) fragmentParams.set("code", code);
-    /*State*/ if (authorization.state != null) fragmentParams.set("state", authorization.state);
-    /*ID Token*/ if (id_token !== undefined) fragmentParams.set("id_token", id_token);
+    /* Code Grant */ if (code !== null) fragmentParams.set("code", code);
+    /* State */ if (authorization.state != null) fragmentParams.set("state", authorization.state);
+    /* ID Token */ if (id_token !== undefined) fragmentParams.set("id_token", id_token);
 
     redirect.hash = fragmentParams.toString();
-    //Invalid response mode
+    // Invalid response mode
   } else {
     callbackLogger.warning("callback does not recognize response_mode", {
       response_mode: authorization.responseMode,
@@ -363,7 +278,7 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
   }
 
   res.redirect(redirect.toString());
-  callbackLogger.info(`Issued code to "${userData.key}" for client "${client_id}"`);
+  callbackLogger.info(`Issued code to "${userDataResult.key}" for client "${client_id}"`);
 });
 
 export {callbackEndpoint};

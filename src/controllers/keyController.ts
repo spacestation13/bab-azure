@@ -1,20 +1,16 @@
-import Prisma from "@prisma/client";
 import {calculateJwkThumbprint, exportJWK, generateKeyPair, importJWK, JWK, CryptoKey} from "jose";
-import {prismaDb} from "../db/index.js";
+import {signingKeys} from "../db/index.js";
 import {moduleLogger} from "../logger.js";
+import type {SigningKeyDoc} from "../db/types.js";
 
 const keyController = moduleLogger("KeyController");
 
-async function generateNewKey(): Promise<Prisma.SigningKey> {
-  const disableOldKey = prismaDb.signingKey.updateMany({
-    where: {
-      active: true,
-    },
-    data: {
-      active: null,
-      private: {},
-    },
-  });
+async function generateNewKey(): Promise<SigningKeyDoc> {
+  await signingKeys.updateMany(
+    {active: true},
+    {$set: {active: null, private: {}}},
+  );
+
   const {publicKey: _publicKey, privateKey: _privateKey} = await generateKeyPair("RS256", {
     extractable: true,
   });
@@ -25,33 +21,27 @@ async function generateNewKey(): Promise<Prisma.SigningKey> {
   const kid = await calculateJwkThumbprint(publicKey);
   publicKey.kid = kid;
   privateKey.kid = kid;
-  const createNewKey = prismaDb.signingKey.create({
-    data: {
-      active: true,
-      id: kid,
-      //@ts-expect-error ts does not play nice with JWK
-      private: privateKey,
-      //@ts-expect-error ts does not play nice with JWK
-      public: publicKey,
-    },
-  });
-  const [, newKey] = await prismaDb.$transaction([disableOldKey, createNewKey]);
-  return newKey;
+
+  const doc: SigningKeyDoc = {
+    _id: kid,
+    active: true,
+    private: privateKey,
+    public: publicKey,
+    createdTime: new Date(),
+  };
+  await signingKeys.insertOne(doc);
+  return doc;
 }
 
-export type SigningKey = Prisma.SigningKey & {
+export type SigningKey = SigningKeyDoc & {
   importedPrivate: CryptoKey | Uint8Array;
   importedPublic: CryptoKey | Uint8Array;
 };
 
 async function getActiveKey(): Promise<SigningKey> {
-  let key = await prismaDb.signingKey.findUnique({
-    where: {
-      active: true,
-    },
-  });
-  const time3daysago = Date.now() - 3 * 24 * 60 * 60 * 1000;
-  if (key === null || key.createdTime.valueOf() < time3daysago) {
+  const time3daysago = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+  let key = await signingKeys.findOne({active: true, createdTime: {$gte: time3daysago}});
+  if (key === null) {
     keyController.info("There are no valid keys. Generating new signing key");
     key = await generateNewKey();
   }
@@ -61,31 +51,4 @@ async function getActiveKey(): Promise<SigningKey> {
   return transformedKey;
 }
 
-async function processOldKeys() {
-  keyController.info("Deleting old keys");
-  const time15daysago = Date.now() - 15 * 24 * 60 * 60 * 1000;
-  await prismaDb.signingKey.deleteMany({
-    where: {
-      createdTime: {
-        lt: new Date(time15daysago).toISOString(),
-      },
-    },
-  });
-}
-
-let registered = false;
-function registerKeyController() {
-  if (registered) throw Error("Attempted to register key controller twice");
-  registered = true;
-
-  function asyncWrapper() {
-    processOldKeys().catch(e => {
-      keyController.crit("Error occured while running key controller", {e});
-    });
-  }
-  //1 hour
-  setInterval(asyncWrapper, 60 * 60 * 1000);
-  setImmediate(asyncWrapper);
-}
-
-export {registerKeyController, generateNewKey, getActiveKey};
+export {generateNewKey, getActiveKey};

@@ -2,7 +2,7 @@ import config from "config";
 import {Request, Response} from "express";
 import expressAsyncHandler from "express-async-handler";
 import {importJWK, JWK, jwtVerify, JWTVerifyGetKey} from "jose";
-import {prismaDb} from "../../db/index.js";
+import {signingKeys} from "../../db/index.js";
 import {moduleLogger} from "../../logger.js";
 
 const userInfoLogger = moduleLogger("userInfo");
@@ -38,7 +38,6 @@ const userInfoEndpoint = expressAsyncHandler(async (req: Request, res: Response)
     res.setHeader("Cache-Control", "private");
     accessToken = authParam;
     // 2.2 Form-Encoded Body Parameter
-    // Or no auth
   } else if (req.method === "POST") {
     if (req.is("application/x-www-form-urlencoded") == false) {
       errorResponse("invalid_request", "Body is not form-urlencoded");
@@ -63,14 +62,10 @@ const userInfoEndpoint = expressAsyncHandler(async (req: Request, res: Response)
     const decodedToken = await jwtVerify(
       accessToken,
       (async protectedHeader => {
-        const key = await prismaDb.signingKey.findUnique({
-          where: {
-            id: protectedHeader.kid,
-          },
-          select: {
-            public: true,
-          },
-        });
+        const key = await signingKeys.findOne(
+          {_id: protectedHeader.kid!},
+          {projection: {public: 1}},
+        );
         if (!key) throw Error(`No key found for ID ${protectedHeader.kid}`);
 
         return await importJWK(key.public as JWK, "RS256");

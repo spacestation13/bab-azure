@@ -3,7 +3,7 @@ import rTracer from "cls-rtracer";
 import config from "config";
 import {Application, NextFunction, Request, Response} from "express";
 import expressAsyncHandler from "express-async-handler";
-import {prismaDb} from "../db/index.js";
+import {byondCerts} from "../db/index.js";
 import {moduleLogger} from "../logger.js";
 import {generateSecureString} from "./crypto.js";
 
@@ -17,7 +17,8 @@ export function registerSecurityMiddleware(app: Application) {
       .end();
   });
 
-  //Security middleware, remove byondcert from the URL asap to prevent it from being social engineer'd out of users
+  // Security middleware: remove byondcert from the URL ASAP to prevent it from being
+  // social-engineered out of users (e.g. asking them to share the URL).
   app.use(
     expressAsyncHandler(async (req, res, next) => {
       function errorRedirect(error: string) {
@@ -32,7 +33,8 @@ export function registerSecurityMiddleware(app: Application) {
       const rawbyondcert = req.query.byondcert;
       if (rawbyondcert !== undefined) {
         req.callback = true;
-        //We stringify here because it could be invalid but we dont care about that, we care about hiding it from the user
+        // We stringify here because it could be invalid, but we don't care about validity —
+        // we only care about hiding it from the user before it can be exfiltrated.
         const jsonbyondcert = JSON.stringify(rawbyondcert);
         const byondState = req.query["byond_state"];
         if (typeof byondState !== "string") {
@@ -41,13 +43,9 @@ export function registerSecurityMiddleware(app: Application) {
         }
 
         if (
-          await prismaDb.byondCert.findUnique({
-            where: {
-              byondState_byondCert: {
-                byondState,
-                byondCert: jsonbyondcert,
-              },
-            },
+          await byondCerts.findOne({
+            byondState,
+            byondCert: jsonbyondcert,
           })
         ) {
           securityLogger.warning("Cert/state combo has already been used", {
@@ -61,13 +59,13 @@ export function registerSecurityMiddleware(app: Application) {
         if (req.ip == null) {
           return errorRedirect("Client hung up before request was complete, or ip is null");
         }
-        const {encodedCert} = await prismaDb.byondCert.create({
-          data: {
-            encodedCert: await generateSecureString(24),
-            byondState,
-            byondCert: jsonbyondcert,
-            clientIp: req.ip,
-          },
+        const encodedCert = await generateSecureString(24);
+        await byondCerts.insertOne({
+          _id: encodedCert,
+          byondState,
+          byondCert: jsonbyondcert,
+          clientIp: req.ip,
+          createdTime: new Date(),
         });
 
         const targetUri = new URL(req.path, config.get<string>("server.publicUrl"));
