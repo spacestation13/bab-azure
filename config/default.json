@@ -1,11 +1,15 @@
 {
+  //Where to bind http server
   "server": {
     "host": "::1",
+    // Use a nonnumeric value to use an environment variable
     "port": "80",
+    //How can people access this service
     "publicUrl": "",
-    // Follows the format at https://expressjs.com/en/4x/api.html#trust.proxy.options.table minus the functions
+    //Is it behind a proxy, follows the format at https://expressjs.com/en/4x/api.html#trust.proxy.options.table minus the functions
     "proxy": false
   },
+  //Database settings
   "database": {
     "connectionString": ""
   },
@@ -13,10 +17,11 @@
     /* Sources */
 
 
+    //Controls settings for the HTTP logger
     "http": {
-      // 1xx-3xx are info, 4xx is always warning, 5xx is always error
+      //Level of 1xx-3xx messages, 4xx is always warning and 5xx is always error
       "level": "info",
-      // Can spam logs quickly
+      //Log metadata about the request and response (can spam logs quickly)
       "meta": false
     },
 
@@ -25,17 +30,21 @@
 
 
     "console": {
+      //Minimum level for logs to be output
       "level": "info",
+      //Enabled
       "enabled": true,
-      // Has performance impact. Ignored when logging.console.json is true
+      //Use util.inspect() to colorize the metadata, has a performance impact. Ignored when logging.console.json is true
       "pretty": false,
-      // Functions/App Insights expects JSON
+      //If console output should be in JSON format. Ignores logging.console.pretty when true
       "json": true
     }
   },
-  // Changing any of these in production is heavily discouraged. You will probably violate an RFC and reduce security.
+  //Changing any of these in production environments is heavily discouraged. You will probably violate an RFC and reduce the security of your installation
   "security": {
+    //Enable mocking of byond.com/login.cgi.
     "test": false,
+    //Enforce redirect_uris
     "enforce_redirect_uri": true
   }
 }

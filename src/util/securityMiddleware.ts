@@ -17,8 +17,7 @@ export function registerSecurityMiddleware(app: Application) {
       .end();
   });
 
-  // Security middleware: remove byondcert from the URL ASAP to prevent it from being
-  // social-engineered out of users (e.g. asking them to share the URL).
+  //Security middleware, remove byondcert from the URL asap to prevent it from being social engineer'd out of users
   app.use(
     expressAsyncHandler(async (req, res, next) => {
       function errorRedirect(error: string) {
@@ -33,8 +32,7 @@ export function registerSecurityMiddleware(app: Application) {
       const rawbyondcert = req.query.byondcert;
       if (rawbyondcert !== undefined) {
         req.callback = true;
-        // We stringify here because it could be invalid, but we don't care about validity —
-        // we only care about hiding it from the user before it can be exfiltrated.
+        //We stringify here because it could be invalid but we dont care about that, we care about hiding it from the user
         const jsonbyondcert = JSON.stringify(rawbyondcert);
         const byondState = req.query["byond_state"];
         if (typeof byondState !== "string") {

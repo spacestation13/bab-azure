@@ -26,7 +26,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
 
   const raw_params = req.method === "GET" ? req.query : req.body;
 
-  // Validate that no query parameters are set twice, and check for Qs memes, see RFC6749 Section 3.1
+  //Validate that no query parameters are set twice, and check for Qs memes, see RFC6749 Section 3.1
   const invalid_query_params: string[] = [];
   for (const [key, value] of Object.entries(raw_params)) {
     if (typeof value !== "string") invalid_query_params.push(key);
@@ -39,6 +39,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     });
     return res
       .status(400)
+      //XSS protection
       .type("text/plain")
       .send(
         `Invalid query parameters: ${invalid_query_params.join(
@@ -48,7 +49,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
       .end();
   }
 
-  // Ignore all empty responses, see RFC6749 Section 3.1
+  //Ignore all empty responses, see RFC6749 Section 3.1
   const {
     response_type: _response_type,
     client_id,
@@ -74,6 +75,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     });
     return res
       .status(400)
+      //XSS protection
       .type("text/plain")
       .send(`Invalid client_id: ${client_id}. Request ID: ${rTracer.id()}`)
       .end();
@@ -91,6 +93,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     });
     return res
       .status(400)
+      //XSS protection
       .type("text/plain")
       .send(
         `The client "${client_id}" has been disabled for the following reason: ${client.disabled}.`,
@@ -98,6 +101,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
       .end();
   }
 
+  //Validate that redirect_uri is valid
   if (
     redirect_uri === undefined ||
     (!client.redirectUris.includes(redirect_uri) &&
@@ -109,15 +113,16 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     });
     return res
       .status(400)
+      //XSS protection
       .type("text/plain")
       .send(`Invalid redirect_uri: ${redirect_uri}. Request ID: ${rTracer.id()}`)
       .end();
   }
 
-  // We have validated enough of the request to know the redirect_uri is valid.
-  // From now on, errors go back to the app.
+  //We have validated enough of the request to know the redirect_uri is valid. From now on, errors go back to the app
   req.redirect_uri = redirect_uri;
 
+  //Set sub claim
   let subClaim = null;
   if (id_token_hint !== undefined) {
     try {
@@ -147,7 +152,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     }
   }
 
-  // https://openid.net/specs/oauth-v2-multiple-response-types-1_0.html Section 2.1 Response Modes
+  //https://openid.net/specs/oauth-v2-multiple-response-types-1_0.html Section 2.1 Response Modes
   if (_response_mode !== undefined && !(_response_mode in ResponseMode)) {
     authLogger.warning("Invalid response_mode", {
       response_mode: _response_mode,
@@ -161,8 +166,10 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
+  //Parse scopes
   let scopes = _scope?.split(" ") ?? null;
 
+  //Validate that scopes include openid
   if (!scopes?.includes("openid")) {
     authLogger.warning("scope is lacking openid scope", {scopes});
     return oauth_authorize_error(
@@ -174,7 +181,9 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
+  // Filter parsed scopes to only the ones we support
   scopes = scopes.filter(scope => supportedScopes.includes(scope));
+
 
   if (_response_type === undefined) {
     authLogger.warning("Response type is required", {_response_type});
@@ -313,7 +322,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
 
   let response_mode = _response_mode as ResponseMode | undefined;
   if (response_mode === undefined) {
-    // ID token spec says default is "fragment"; code and none default to "query"
+    //ID token says default is "fragment", code and none is "query"
     if (response_types.includes("id_token")) {
       response_mode = "fragment";
     } else {
@@ -363,7 +372,6 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
 
   // Leaving the spec and entering our implementation code
 
-  // Save information about the login attempt
   if (req.ip == null) {
     return oauth_authorize_error(
       res,

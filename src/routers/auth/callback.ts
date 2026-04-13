@@ -16,10 +16,16 @@ export const callbackLogger = moduleLogger("CallbackEndpoint");
 
 const callbackEndpoint = expressAsyncHandler(async (req, res) => {
   function returnError(error: string) {
-    res.status(400).type("text/plain").send(`${error} Request ID: ${rTracer.id()}`).end();
+    res
+      .status(400)
+      //XSS protection
+      .type("text/plain")
+      .send(`${error} Request ID: ${rTracer.id()}`)
+      .end();
   }
 
   const client_id = req.query.client_id;
+
 
   const byondState = req.query.byond_state;
   if (typeof byondState !== "string") {
@@ -64,7 +70,7 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     return returnError("byondState mismatch.");
   }
 
-  // securityMiddleware only encodes it; we verify its shape here.
+  // Validate the actual byondCert; we don't check it in securityMiddleware, we just encode it
   const byondCert = JSON.parse(decodedCert.byondCert);
   if (typeof byondCert !== "string") {
     callbackLogger.warning("byondCert is invalid", {
@@ -157,10 +163,9 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  // Fetch the user data either from BYOND or the test mock
   let userDataResult;
   if (getBool("security.test")) {
-    // Cert == ckey in test mode
+    // Cert == ckey (invariant: identity for test mode)
     userDataResult = {
       valid: true,
       key: byondCert,
@@ -182,7 +187,6 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  // Sub claim enforcement: the client asked for a specific user, and someone else is logged in
   if (authorization.subClaim !== null && authorization.subClaim !== userDataResult.key) {
     callbackLogger.warning("Another user is logged in", {byondCert, domain});
     return oauth_authorize_error(
@@ -194,7 +198,6 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     );
   }
 
-  // Mint a code and associate the authorization with the user data
   const code = (authorization.responseTypes.includes("code") as boolean)
     ? await generateSecureString(24)
     : null;
@@ -243,24 +246,20 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
       .sign(key.importedPrivate);
   }
 
-  // Redirect back to app with code / id_token
   const redirect = new URL(authorization.redirectUri);
 
-  // Query response mode
   if (authorization.responseMode === ResponseMode.query) {
-    /* Code Grant */ if (code !== null) redirect.searchParams.set("code", code);
-    /* State */ if (authorization.state != null)
+    if (code !== null) redirect.searchParams.set("code", code);
+    if (authorization.state != null)
       redirect.searchParams.set("state", authorization.state);
-    // Fragment response mode
   } else if (authorization.responseMode === ResponseMode.fragment) {
     const fragmentParams = new URLSearchParams();
 
-    /* Code Grant */ if (code !== null) fragmentParams.set("code", code);
-    /* State */ if (authorization.state != null) fragmentParams.set("state", authorization.state);
-    /* ID Token */ if (id_token !== undefined) fragmentParams.set("id_token", id_token);
+    if (code !== null) fragmentParams.set("code", code);
+    if (authorization.state != null) fragmentParams.set("state", authorization.state);
+    if (id_token !== undefined) fragmentParams.set("id_token", id_token);
 
     redirect.hash = fragmentParams.toString();
-    // Invalid response mode
   } else {
     callbackLogger.warning("callback does not recognize response_mode", {
       response_mode: authorization.responseMode,

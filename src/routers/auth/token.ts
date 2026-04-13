@@ -18,7 +18,6 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     client_secret: param_client_secret,
   } = req.body;
 
-  // Validate parameters
   if (typeof grant_type !== "string") {
     tokenLogger.warning(`grant_type is not a string`, {grant_type});
     return oauth_token_error(res, "invalid_request", `grant_type is not a string`);
@@ -35,13 +34,12 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     tokenLogger.warning(`client_id is not a string`, {param_client_secret});
     return oauth_token_error(res, "invalid_request", `client_id is not a string`);
   }
-  // We also support http basic auth; proper auth is checked later, for now allow missing client_secret
+  //We also support http basic auth, we'll check for proper auth later, for now, allow client_secret
   if (typeof param_client_secret !== "string" && param_client_secret !== undefined) {
     tokenLogger.warning(`client_secret is not a string`, {param_client_secret});
     return oauth_token_error(res, "invalid_request", `client_secret is not a string or null`);
   }
 
-  // Validate grant_type
   if (grant_type !== "authorization_code") {
     tokenLogger.warning('grant_type is not "authorization_code"', {grant_type});
     return oauth_token_error(
@@ -72,18 +70,15 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     return res.status(401).setHeader("WWW-Authenticate", "Basic").end();
   }
 
-  // Fetch the client
   const client = await clients.findOne(
     {_id: client_id},
     {projection: {clientSecret: 1, type: 1, expiry: 1, disabled: 1}},
   );
 
-  // Check that the client exists
   if (!client) {
     tokenLogger.warning("Client not found", {client_id});
     return oauth_token_error(res, "unsupported_grant_type", "Unknown client_id");
   }
-  // Validate client authentication
   if (client.type === ClientType.Confidential) {
     if (client_secret === undefined) {
       tokenLogger.warning("Attempted to call token endpoint without a client_secret", {
@@ -100,7 +95,6 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     }
   }
 
-  // Fetch the authorization
   const authorization = await authorizations.findOne({code});
 
   const time5minsago = Date.now() - 5 * 60 * 1000;
@@ -123,6 +117,7 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     {$set: {status: AuthorizationStatus.Completed}},
   );
 
+  // If there's a code, it's for the correct client
   if (authorization.clientId !== client_id) {
     tokenLogger.warning("Code for wrong client", {
       code,
@@ -156,18 +151,18 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
 
   const access_token = await new SignJWT({
     iss: config.get<string>("server.publicUrl"),
-    // If there's a code, there's a ckey
+    //If there's a code, there's a ckey
     sub: `user:${authorization.ckey!}`,
     ckey: authorization.ckey!,
     aud: config.get<string>("server.publicUrl"),
     exp: currentEpoch + client.expiry,
     iat: currentEpoch.valueOf(),
-    // If there's a code, the auth is complete
+    //If there's a code, the auth is complete
     auth_time: authTime,
     nonce: authorization.nonce,
     azp: client_id,
     c_hash: generateOIDCHash(code),
-    // If there's a code, there's a gender
+    //If there's a code, there's a gender
     gender: authUser!.gender,
   })
     .setProtectedHeader({
@@ -178,19 +173,19 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     .sign(key.importedPrivate);
   const id_token = await new SignJWT({
     iss: config.get<string>("server.publicUrl"),
-    // If there's a code, there's a ckey
+    //If there's a code, there's a ckey
     sub: `user:${authorization.ckey!}`,
     ckey: authorization.ckey!,
     aud: client_id,
     exp: currentEpoch.valueOf() + client.expiry,
     iat: currentEpoch.valueOf(),
-    // If there's a code, the auth is complete
+    //If there's a code, the auth is complete
     auth_time: authTime,
     nonce: authorization.nonce,
     azp: client_id,
     c_hash: generateOIDCHash(code),
     at_hash: generateOIDCHash(access_token),
-    // If there's a code, there's a gender
+    //If there's a code, there's a gender
     gender: authUser!.gender,
   })
     .setProtectedHeader({
