@@ -13,6 +13,7 @@ import {moduleLogger} from "../../logger.js";
 import {promptTypes, supportedScopes} from "../../util/constants.js";
 import {generateSecureString} from "../../util/crypto.js";
 import {oauth_authorize_error} from "../../util/responseHelpers.js";
+import {getBool} from "../../util/configHelpers.js";
 
 const authLogger = moduleLogger("AuthorizeEndpoint");
 const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
@@ -100,7 +101,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
   if (
     redirect_uri === undefined ||
     (!client.redirectUris.includes(redirect_uri) &&
-      config.get<boolean>("security.enforce_redirect_uri"))
+      getBool("security.enforce_redirect_uri"))
   ) {
     authLogger.warning(`Invalid redirect_uri`, {
       client_id: client_id,
@@ -393,7 +394,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
 
   const publicUrl = config.get<string>("server.publicUrl");
   let byondUrl;
-  if (config.get<boolean>("security.test")) {
+  if (getBool("security.test")) {
     byondUrl = new URL("/test", publicUrl);
   } else {
     byondUrl = new URL("https://secure.byond.com/login.cgi");

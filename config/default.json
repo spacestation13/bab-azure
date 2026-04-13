@@ -35,7 +35,6 @@
   },
   // Changing any of these in production is heavily discouraged. You will probably violate an RFC and reduce security.
   "security": {
-    // Mock byond.com/login.cgi
     "test": false,
     "enforce_redirect_uri": true
   }

@@ -1,14 +1,14 @@
 import {URL} from "url";
 import {resolve} from "path";
-import config from "config";
 import express from "express";
 import {dirname} from "../index.js";
+import {getBool} from "../util/configHelpers.js";
 
 const testRouter = express.Router();
 
 export {testRouter};
 
-if (config.get<boolean>("security.test"))
+if (getBool("security.test"))
   testRouter
     .route("/")
     .get((_, res) => {

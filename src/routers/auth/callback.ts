@@ -10,16 +10,13 @@ import {moduleLogger} from "../../logger.js";
 import {domain} from "../../util/constants.js";
 import {generateOIDCHash, generateSecureString, secureCompare} from "../../util/crypto.js";
 import {oauth_authorize_error} from "../../util/responseHelpers.js";
+import {getBool} from "../../util/configHelpers.js";
 
 export const callbackLogger = moduleLogger("CallbackEndpoint");
 
 const callbackEndpoint = expressAsyncHandler(async (req, res) => {
   function returnError(error: string) {
-    res
-      .status(400)
-      .type("text/plain")
-      .send(`${error} Request ID: ${rTracer.id()}`)
-      .end();
+    res.status(400).type("text/plain").send(`${error} Request ID: ${rTracer.id()}`).end();
   }
 
   const client_id = req.query.client_id;
@@ -162,7 +159,7 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
 
   // Fetch the user data either from BYOND or the test mock
   let userDataResult;
-  if (config.get<boolean>("security.test")) {
+  if (getBool("security.test")) {
     // Cert == ckey in test mode
     userDataResult = {
       valid: true,

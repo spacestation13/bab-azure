@@ -5,6 +5,7 @@ import expressWinston from "express-winston";
 import registerRouters from "./routers/index.js";
 import {moduleLogger} from "./logger.js";
 import {registerSecurityMiddleware} from "./util/securityMiddleware.js";
+import {getBool} from "./util/configHelpers.js";
 
 const httpLogger = moduleLogger("HTTP");
 
@@ -46,7 +47,7 @@ expressApp.use(
     winstonInstance: httpLogger,
     metaField: "http",
     msg: "{{res.responseTime}}ms {{res.statusCode}} {{req.method}} {{req.url}}",
-    meta: config.get<boolean>("logging.http.meta"),
+    meta: getBool("logging.http.meta"),
     statusLevels: {
       success: config.get<string>("logging.http.level"),
       warn: "warning",

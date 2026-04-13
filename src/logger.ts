@@ -6,6 +6,7 @@ const {createLogger, format, transports} = winston;
 import chalk from "chalk";
 import {table} from "table";
 import pchars from "printable-characters";
+import {getBool} from "./util/configHelpers";
 export const logLevels = {
   emerg: 0,
   crit: 1,
@@ -53,7 +54,7 @@ const consoleFormatter = format.printf(info => {
 
   const formattedMetadata = Object.entries(metadata).map(([key, val]) => [
     key,
-    config.get<boolean>("logging.console.pretty")
+    getBool("logging.console.pretty")
       ? inspect(val, {colors: true, compact: true, breakLength: Infinity, depth: 5})
       : JSON.stringify(val),
   ]);
@@ -124,7 +125,7 @@ const logger = createLogger({
   transports: [
     new transports.Console({
       level: config.get<string>("logging.console.level"),
-      silent: !config.get<boolean>("logging.console.enabled"),
+      silent: !getBool("logging.console.enabled"),
       format: config.get<string>("logging.console.json")
         ? format.combine(
             stripEmptyMeta(),
