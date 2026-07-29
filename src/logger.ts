@@ -6,7 +6,7 @@ const {createLogger, format, transports} = winston;
 import chalk from "chalk";
 import {table} from "table";
 import pchars from "printable-characters";
-import {getBool} from "./util/configHelpers";
+import {getBool} from "./util/configHelpers.js";
 export const logLevels = {
   emerg: 0,
   crit: 1,
