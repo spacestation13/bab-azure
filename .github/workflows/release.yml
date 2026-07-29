@@ -33,6 +33,7 @@ jobs:
           mkdir -p pkg
           cp -r dist pkg/
           cp -r node_modules pkg/
+          cp -r config pkg/
           cp host.json pkg/
           cp package.json pkg/
           ( cd pkg && zip -rq "$GITHUB_WORKSPACE/bab.zip" . )
