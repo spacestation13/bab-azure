@@ -1,6 +1,7 @@
 {
   "database": {
-    "connectionString": "BAB_DB_CONNECTION_STRING"
+    "connectionString": "BAB_DB_CONNECTION_STRING",
+    "name": "BAB_DB_NAME"
   },
   "server": {
     "publicUrl": "BAB_PUBLIC_URL",

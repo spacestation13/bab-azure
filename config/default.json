@@ -11,7 +11,8 @@
   },
   //Database settings
   "database": {
-    "connectionString": ""
+    "connectionString": "",
+    "name": "bab"
   },
   "logging": {
     /* Sources */

@@ -23,7 +23,7 @@ export let signingKeys: Collection<SigningKeyDoc>;
 
 export async function connectDb() {
   await client.connect();
-  db = client.db("bab");
+  db = client.db(config.get<string>("database.name"));
 
   clients = db.collection<ClientDoc>("clients");
   authorizations = db.collection<AuthorizationDoc>("authorizations");
