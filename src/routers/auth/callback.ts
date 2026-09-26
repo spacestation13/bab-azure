@@ -4,13 +4,13 @@ import rTracer from "cls-rtracer";
 import config from "config";
 import expressAsyncHandler from "express-async-handler";
 import {getActiveKey} from "../../controllers/keyController.js";
-import {authorizations, byondCerts, clients, userData} from "../../db/index.js";
+import {authorizations, byondCerts, userData} from "../../db/index.js";
 import {AuthorizationStatus, ResponseMode} from "../../db/types.js";
 import {moduleLogger} from "../../logger.js";
 import {domain} from "../../util/constants.js";
 import {generateOIDCHash, generateSecureString, secureCompare} from "../../util/crypto.js";
 import {oauth_authorize_error} from "../../util/responseHelpers.js";
-import {getBool} from "../../util/configHelpers.js";
+import {getBool, getClient} from "../../util/configHelpers.js";
 
 export const callbackLogger = moduleLogger("CallbackEndpoint");
 
@@ -89,10 +89,7 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
     return returnError("Unable to find authorization request");
   }
 
-  const authClient = await clients.findOne(
-    {_id: authorization.clientId},
-    {projection: {expiry: 1, disabled: 1}},
-  );
+  const authClient = getClient(authorization.clientId);
   if (!authClient) {
     callbackLogger.warning("Client from authorization no longer exists", {
       clientId: authorization.clientId,

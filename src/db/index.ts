@@ -1,11 +1,9 @@
 import config from "config";
 import {MongoClient, Collection, Db} from "mongodb";
 import {moduleLogger} from "../logger.js";
-import {ClientType} from "./types.js";
 import type {
   AuthorizationDoc,
   ByondCertDoc,
-  ClientDoc,
   SigningKeyDoc,
   UserDataDoc,
 } from "./types.js";
@@ -16,7 +14,6 @@ const client = new MongoClient(config.get<string>("database.connectionString"));
 
 let db: Db;
 
-export let clients: Collection<ClientDoc>;
 export let authorizations: Collection<AuthorizationDoc>;
 export let userData: Collection<UserDataDoc>;
 export let byondCerts: Collection<ByondCertDoc>;
@@ -26,7 +23,6 @@ export async function connectDb() {
   await client.connect();
   db = client.db(config.get<string>("database.name"));
 
-  clients = db.collection<ClientDoc>("clients");
   authorizations = db.collection<AuthorizationDoc>("authorizations");
   userData = db.collection<UserDataDoc>("userData");
   byondCerts = db.collection<ByondCertDoc>("byondCerts");
@@ -47,34 +43,7 @@ export async function connectDb() {
     signingKeys.createIndex({createdTime: 1}, {expireAfterSeconds: 30 * 24 * 60 * 60}),
   ]);
 
-  await seedClient();
-
   dbLogger.info("Connected to MongoDB");
-}
-
-async function seedClient() {
-  if (!config.has("seed.clientId")) return;
-
-  const clientId = config.get<string>("seed.clientId");
-  const clientSecret = config.get<string>("seed.clientSecret");
-  const redirectUri = config.get<string>("seed.redirectUri");
-
-  if (!clientId || !clientSecret || !redirectUri) return;
-
-  const doc: ClientDoc = {
-    _id: clientId,
-    redirectUris: [redirectUri],
-    contactInfo: "Auto-provisioned",
-    desc: "Auto-provisioned OAuth client",
-    type: ClientType.Confidential,
-    clientSecret,
-    allowedTokenGrant: false,
-    expiry: 10080,
-    disabled: null,
-  };
-
-  await clients.updateOne({_id: clientId}, {$setOnInsert: doc}, {upsert: true});
-  dbLogger.info("Seed client ensured", {clientId});
 }
 
 process.on("SIGTERM", () => {

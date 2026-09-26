@@ -3,7 +3,7 @@ import {JWTVerifyGetKey, importJWK, JWK, jwtVerify} from "jose";
 import rTracer from "cls-rtracer";
 import config from "config";
 import expressAsyncHandler from "express-async-handler";
-import {authorizations, clients, signingKeys} from "../../db/index.js";
+import {authorizations, signingKeys} from "../../db/index.js";
 import {
   AuthorizationStatus,
   ResponseMode,
@@ -13,7 +13,7 @@ import {moduleLogger} from "../../logger.js";
 import {promptTypes, supportedScopes} from "../../util/constants.js";
 import {generateSecureString} from "../../util/crypto.js";
 import {oauth_authorize_error} from "../../util/responseHelpers.js";
-import {getBool} from "../../util/configHelpers.js";
+import {getBool, getClient} from "../../util/configHelpers.js";
 
 const authLogger = moduleLogger("AuthorizeEndpoint");
 const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
@@ -81,10 +81,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
       .end();
   };
   if (client_id === undefined) return unknownClientId();
-  const client = await clients.findOne(
-    {_id: client_id},
-    {projection: {redirectUris: 1, allowedTokenGrant: 1, disabled: 1}},
-  );
+  const client = getClient(client_id);
   if (!client) return unknownClientId();
 
   if (client.disabled !== null) {

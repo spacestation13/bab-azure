@@ -2,10 +2,11 @@ import config from "config";
 import expressAsyncHandler from "express-async-handler";
 import {SignJWT} from "jose";
 import {getActiveKey} from "../../controllers/keyController.js";
-import {authorizations, clients, userData} from "../../db/index.js";
+import {authorizations, userData} from "../../db/index.js";
 import {AuthorizationStatus, ClientType} from "../../db/types.js";
 import {moduleLogger} from "../../logger.js";
 import {generateOIDCHash, secureCompare} from "../../util/crypto.js";
+import {getClient} from "../../util/configHelpers.js";
 import {oauth_token_error} from "../../util/responseHelpers.js";
 
 const tokenLogger = moduleLogger("TokenEndpoint");
@@ -70,10 +71,7 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     return res.status(401).setHeader("WWW-Authenticate", "Basic").end();
   }
 
-  const client = await clients.findOne(
-    {_id: client_id},
-    {projection: {clientSecret: 1, type: 1, expiry: 1, disabled: 1}},
-  );
+  const client = getClient(client_id);
 
   if (!client) {
     tokenLogger.warning("Client not found", {client_id});

@@ -21,4 +21,5 @@ jobs:
       - name: Verify ESM imports resolve
         env:
           BAB_DB_CONNECTION_STRING: "mongodb://localhost:27017/test"
+          BAB_PUBLIC_URL: "http://localhost:8080"
         run: node --input-type=module -e "await import('./dist/functions/http.js')"

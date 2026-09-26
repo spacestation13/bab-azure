@@ -13,10 +13,13 @@
     "test": "BAB_SECURITY_TEST",
     "enforce_redirect_uri": "BAB_ENFORCE_REDIRECT_URI"
   },
-  "seed": {
-    "clientId": "BAB_SEED_CLIENT_ID",
-    "clientSecret": "BAB_SEED_CLIENT_SECRET",
-    "redirectUri": "BAB_SEED_REDIRECT_URI"
+  "client": {
+    "clientId": "BAB_CLIENT_ID",
+    "clientSecret": "BAB_CLIENT_SECRET",
+    "redirectUris": {
+      "__name": "BAB_CLIENT_REDIRECT_URIS",
+      "__format": "json"
+    }
   },
   "logging": {
     "console": {

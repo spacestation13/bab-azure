@@ -28,18 +28,6 @@ export const AuthorizationStatus = {
 export type AuthorizationStatus =
   (typeof AuthorizationStatus)[keyof typeof AuthorizationStatus];
 
-export interface ClientDoc {
-  _id: string;
-  redirectUris: string[];
-  contactInfo: string;
-  desc: string;
-  type: ClientType;
-  clientSecret: string | null;
-  allowedTokenGrant: boolean;
-  expiry: number;
-  disabled: string | null;
-}
-
 export interface AuthorizationDoc {
   _id?: ObjectId;
   status: AuthorizationStatus;
