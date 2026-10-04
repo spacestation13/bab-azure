@@ -2,7 +2,7 @@ import config from "config";
 import expressAsyncHandler from "express-async-handler";
 import {SignJWT} from "jose";
 import {getActiveKey} from "../../controllers/keyController.js";
-import {authorizations, userData} from "../../db/index.js";
+import {authorizations} from "../../db/index.js";
 import {AuthorizationStatus, ClientType} from "../../db/types.js";
 import {moduleLogger} from "../../logger.js";
 import {generateOIDCHash, secureCompare} from "../../util/crypto.js";
@@ -106,10 +106,6 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     return oauth_token_error(res, "invalid_grant", "Invalid code");
   }
 
-  const authUser = authorization.ckey
-    ? await userData.findOne({_id: authorization.ckey}, {projection: {gender: 1}})
-    : null;
-
   await authorizations.updateOne(
     {_id: authorization._id},
     {$set: {status: AuthorizationStatus.Completed}},
@@ -160,8 +156,7 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     nonce: authorization.nonce,
     azp: client_id,
     c_hash: generateOIDCHash(code),
-    //If there's a code, there's a gender
-    gender: authUser!.gender,
+    gender: authorization.gender,
   })
     .setProtectedHeader({
       alg: "RS256",
@@ -171,20 +166,17 @@ const tokenEndpoint = expressAsyncHandler(async (req, res) => {
     .sign(key.importedPrivate);
   const id_token = await new SignJWT({
     iss: config.get<string>("server.publicUrl"),
-    //If there's a code, there's a ckey
     sub: `user:${authorization.ckey!}`,
     ckey: authorization.ckey!,
     aud: client_id,
     exp: currentEpoch.valueOf() + client.expiry,
     iat: currentEpoch.valueOf(),
-    //If there's a code, the auth is complete
     auth_time: authTime,
     nonce: authorization.nonce,
     azp: client_id,
     c_hash: generateOIDCHash(code),
     at_hash: generateOIDCHash(access_token),
-    //If there's a code, there's a gender
-    gender: authUser!.gender,
+    gender: authorization.gender,
   })
     .setProtectedHeader({
       alg: "RS256",

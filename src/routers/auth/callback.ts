@@ -4,7 +4,7 @@ import rTracer from "cls-rtracer";
 import config from "config";
 import expressAsyncHandler from "express-async-handler";
 import {getActiveKey} from "../../controllers/keyController.js";
-import {authorizations, byondCerts, userData} from "../../db/index.js";
+import {authorizations, byondCerts} from "../../db/index.js";
 import {AuthorizationStatus, ResponseMode} from "../../db/types.js";
 import {moduleLogger} from "../../logger.js";
 import {domain} from "../../util/constants.js";
@@ -198,11 +198,6 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
   const code = (authorization.responseTypes.includes("code") as boolean)
     ? await generateSecureString(24)
     : null;
-  await userData.updateOne(
-    {_id: userDataResult.key},
-    {$set: {gender: userDataResult.gender}},
-    {upsert: true},
-  );
   await authorizations.updateOne(
     {_id: authorization._id},
     {
@@ -213,6 +208,7 @@ const callbackEndpoint = expressAsyncHandler(async (req, res) => {
           : AuthorizationStatus.Completed,
         endDate: new Date(),
         ckey: userDataResult.key,
+        gender: userDataResult.gender,
       },
     },
   );

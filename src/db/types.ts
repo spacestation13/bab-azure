@@ -45,11 +45,7 @@ export interface AuthorizationDoc {
   byondState: string;
   ckey: string | null;
   code: string | null;
-}
-
-export interface UserDataDoc {
-  _id: string;
-  gender: string;
+  gender: string | null;
 }
 
 export interface ByondCertDoc {

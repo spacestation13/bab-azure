@@ -395,6 +395,7 @@ const authorizeEndpoint = expressAsyncHandler(async (req, res) => {
     subClaim: (subClaim as string | null) ?? null,
     ckey: null,
     code: null,
+    gender: null,
   });
 
   const publicUrl = config.get<string>("server.publicUrl");

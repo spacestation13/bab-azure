@@ -5,7 +5,6 @@ import type {
   AuthorizationDoc,
   ByondCertDoc,
   SigningKeyDoc,
-  UserDataDoc,
 } from "./types.js";
 
 const dbLogger = moduleLogger("Database");
@@ -15,7 +14,6 @@ const client = new MongoClient(config.get<string>("database.connectionString"));
 let db: Db;
 
 export let authorizations: Collection<AuthorizationDoc>;
-export let userData: Collection<UserDataDoc>;
 export let byondCerts: Collection<ByondCertDoc>;
 export let signingKeys: Collection<SigningKeyDoc>;
 
@@ -24,7 +22,6 @@ export async function connectDb() {
   db = client.db(config.get<string>("database.name"));
 
   authorizations = db.collection<AuthorizationDoc>("authorizations");
-  userData = db.collection<UserDataDoc>("userData");
   byondCerts = db.collection<ByondCertDoc>("byondCerts");
   signingKeys = db.collection<SigningKeyDoc>("signingKeys");
 
